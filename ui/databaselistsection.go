@@ -2,7 +2,7 @@ package ui
 
 import (
     "github.com/therecipe/qt/widgets"
-    "github.com/any626/GoRedis/services"
+    "github.com/any626/Redis-Control/services"
     "strconv"
 )
 

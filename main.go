@@ -3,8 +3,8 @@ package main
 import (
     "os"
     "github.com/therecipe/qt/widgets"
-    "github.com/any626/GoRedis/services"
-    "github.com/any626/GoRedis/models"
+    "github.com/any626/Redis-Control/services"
+    "github.com/any626/Redis-Control/models"
     // "github.com/garyburd/redigo/redis"
     "fmt"
     "strconv"
@@ -13,7 +13,7 @@ import (
     // "strings"
     // "github.com/therecipe/qt/core"
     // "github.com/therecipe/qt/gui"
-    "github.com/any626/GoRedis/ui"
+    "github.com/any626/Redis-Control/ui"
 )
 
 func main() {

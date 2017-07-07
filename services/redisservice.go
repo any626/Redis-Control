@@ -3,7 +3,7 @@ package services
 import (
     "fmt"
     "github.com/garyburd/redigo/redis"
-    "github.com/any626/GoRedis/models"
+    "github.com/any626/Redis-Control/models"
     "log"
     "errors"
 )
