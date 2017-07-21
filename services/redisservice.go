@@ -1,22 +1,26 @@
 package services
 
 import (
+	"io/ioutil"
 	"errors"
 	"fmt"
 	"github.com/any626/Redis-Control/models"
+	"github.com/any626/Redis-Control/utils"
 	"github.com/garyburd/redigo/redis"
 	"log"
+	// "github.com/any626/Redis-Control/utils"
+	"net"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
+	"path/filepath"
+	"os"
+	// "strings"
 )
 
 // RedisConfig holds the config data for redis
-type RedisConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Database int    `json:"database"`
-}
 
 // Get a new Redis Service
-func NewRedisService(config *RedisConfig) *RedisService {
+func NewRedisService(config *utils.Connection) *RedisService {
 	rService := &RedisService{Config: config}
 	rService.Pool = rService.getRedisPool()
 	return rService
@@ -24,16 +28,84 @@ func NewRedisService(config *RedisConfig) *RedisService {
 
 // GetRedisPool returns a redis pool provided the RedisConfig
 func (rService *RedisService) getRedisPool() *redis.Pool {
+	config := rService.Config
 
-	address := fmt.Sprintf("%s:%d", rService.Config.Host, rService.Config.Port)
+	address := fmt.Sprintf("%s:%d", config.Host, config.Port)
+
+	var client *ssh.Client
+	if config.SSHEnabled {
+		hostKeyCallback, err := knownhosts.New(filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts"))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		privBuff, err := ioutil.ReadFile(config.SSHPrivateKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		var signer ssh.Signer
+		if config.SSHPassword != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(privBuff, []byte(config.SSHPassword))
+			if err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			signer, err = ssh.ParsePrivateKey(privBuff)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+		sshConfig := &ssh.ClientConfig {
+			User: config.SSHUser,
+			Auth: []ssh.AuthMethod {
+				ssh.PublicKeys(signer),
+				ssh.Password(config.SSHPassword),
+			},
+			HostKeyCallback: hostKeyCallback,
+		}
+
+		sshAddress := fmt.Sprintf("%s:%d", config.SSHHost, config.SSHPort)
+		netConn, err := net.Dial("tcp", sshAddress)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		clientConn, chans, reqs, err := ssh.NewClientConn(netConn, sshAddress, sshConfig)
+		if err != nil {
+			netConn.Close()
+			log.Fatal(err)
+		}
+		client = ssh.NewClient(clientConn, chans, reqs)
+	}
 
 	return &redis.Pool{
 		MaxIdle:   5, // max idle connections
 		MaxActive: 5, // max number of connections
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", address)
-			if err != nil {
-				log.Fatalln(err.Error())
+			var dialOption redis.DialOption
+			var c redis.Conn
+			var err error
+			if client != nil {
+				dialOption = redis.DialNetDial(func(network, adr string) (net.Conn, error){
+					conn, err := client.Dial("tcp", address)
+					if err != nil {
+						client.Close()
+						log.Fatal(err)
+					}
+					return conn, nil
+				})
+
+				c, err = redis.Dial("tcp", address, dialOption)
+				if err != nil {
+					log.Fatalln(err.Error())
+				}
+			} else {
+				c, err = redis.Dial("tcp", address)
+				if err != nil {
+					log.Fatalln(err.Error())
+				}
 			}
 
 			// Sets the database
@@ -50,7 +122,7 @@ func (rService *RedisService) getRedisPool() *redis.Pool {
 }
 
 type RedisService struct {
-	Config *RedisConfig
+	Config *utils.Connection
 	Pool   *redis.Pool
 }
 
@@ -63,12 +135,27 @@ func (rService *RedisService) GetDatabaseCount() (int, error) {
 	conn := rService.Pool.Get()
 	defer conn.Close()
 
-	data, err := redis.Values(conn.Do("CONFIG", "GET", "databases"))
-	if err != nil {
-		return 0, err
+	count := 0
+	for {
+		_, err := conn.Do("SELECT", count)
+		if err != nil {
+			if count == 0 {
+				return 0, err
+			}
+			break
+		}
+		count++
 	}
 
-	return redis.Int(data[1], nil)
+	return count, nil
+
+	// if count 
+	// data, err := redis.Values(conn.Do("CONFIG", "GET", "databases"))
+	// if err != nil {
+	// 	return 0, err
+	// }
+
+	// return redis.Int(data[1], nil)
 }
 
 func (rService *RedisService) GetKeys(keys chan string, keyErrors chan error) {
